@@ -1,7 +1,6 @@
 import os
 import sys
 
-import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -83,7 +82,6 @@ doptimizer = torch.optim.Adam(dnet.parameters(), lr=0.0002, betas=(0.5, 0.999))
 plt.ion()
 for epoch in range(epochs):
     print('Epoch: {}/{}'.format(epoch + 1, epochs))
-    progbar = tqdm.trange(len(dataloader), ascii=True)
 
     for i, data in enumerate(dataloader):
         # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
@@ -119,9 +117,12 @@ for epoch in range(epochs):
         gloss.backward()
         goptimizer.step()
 
-        postfix = 'dloss: {:.4f}, gloss: {:.4f}, D(x): {:.2f}, D(G(z)): {:.2f}/{:.2f}'.format(dloss.item(), gloss.item(), D_x, D_G_z1, D_G_z2)
-        progbar.set_postfix_str(postfix)
-        progbar.update()
+        print(
+            '[{}/{}]'.format(epoch + 1, epochs) +
+            '[{}/{}]'.format(i + 1, len(dataloader)) + ', ' +
+            'dloss: {:.4f}, gloss: {:.4f}'.format(dloss.item(), gloss.item()) + ', ' +
+            'D(x): {:.2f}, D(G(z)): {:.2f}/{:.2f}'.format(D_x, D_G_z1, D_G_z2)
+        )
 
         if i % 100 == 99:
             fake = gnet(fixed_noises)
@@ -129,9 +130,7 @@ for epoch in range(epochs):
             fake = tv.utils.make_grid(fake)
             fake = fake.numpy().transpose(1, 2, 0)
             plt.imshow(fake)
-            plt.pause(0.001)
-
-    progbar.close()
+            plt.pause(0.1)
 
 plt.ioff()
 plt.show()
