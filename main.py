@@ -84,7 +84,9 @@ for epoch in range(epochs):
     print('Epoch: {}/{}'.format(epoch + 1, epochs))
 
     for i, data in enumerate(dataloader):
-        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+        # V(D, G) = log(D(x)) + log(1 - D(G(z)))
+
+        # (1) update dnet: maximize D(x), minimize D(G(z)) -> maximize V(D, G)
         # train with real
         real = data[0].to(device)
         batch_size = real.size(0)
@@ -107,7 +109,7 @@ for epoch in range(epochs):
         dloss.backward()
         doptimizer.step()
 
-        # (2) Update G network: maximize log(D(G(z)))
+        # (2) update gnet: maximize D(G(z)) -> minimize V(D, G)
         labels = torch.ones(batch_size).to(device)
         outputs = dnet(fake).view(-1)
         gloss = criterion(outputs, labels)
