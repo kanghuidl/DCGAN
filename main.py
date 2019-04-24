@@ -9,7 +9,7 @@ import torch.nn as nn
 import torchvision as tv
 
 
-epochs = 10
+epochs = 1
 batch_size = 64
 
 nc, nz, ngf, ndf = 1, 64, 64, 64
