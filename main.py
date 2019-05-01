@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,20 +9,23 @@ import torch
 import torch.nn as nn
 import torchvision as tv
 
+from models import Generator
+from models import Discriminator
+from torchvision import datasets
+from torch.utils.data import DataLoader
 
-epochs = 1
-batch_size = 64
 
-nc, nz, ngf, ndf = 1, 64, 64, 64
-
-root = os.path.expanduser('~/.torch/datasets')
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-dataset = tv.datasets.MNIST(root, transform=tv.transforms.ToTensor())
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-fixed_noises = torch.randn(batch_size, nz, 1, 1).to(device)
-
+parser = argparse.ArgumentParser()
+parser.add_argument('--data', type=str, default=os.path.expanduser('~/.torch/datasets'))
+parser.add_argument('--epochs', type=int, default=1)
+parser.add_argument('--lr', type=float, default=0.0002)
+parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--in_channels', type=int, default=64)
+parser.add_argument('--out_channels', type=int, default=1)
+cfg = parser.parse_args()
+print(cfg)
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -31,103 +35,80 @@ def weights_init(m):
         nn.init.normal_(m.weight, 1.0, 0.02)
         nn.init.constant_(m.bias, 0)
 
+net_G = Generator(cfg.in_channels, cfg.out_channels)
+net_G = net_G.to(device)
+net_G.apply(weights_init)
 
-gnet = nn.Sequential(
-    # (nz, 1, 1)
-    nn.ConvTranspose2d(nz, 4 * ngf, kernel_size=4, stride=1, padding=0, bias=False),
-    nn.BatchNorm2d(4 * ngf),
-    nn.ReLU(inplace=True),
-    # (4 * ngf, 4, 4)
-    nn.ConvTranspose2d(4 * ngf, 2 * ngf, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(2 * ngf),
-    nn.ReLU(inplace=True),
-    # (2 * ngf, 8, 8)
-    nn.ConvTranspose2d(2 * ngf, ngf, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(ngf),
-    nn.ReLU(inplace=True),
-    # (ngf, 16, 16)
-    nn.ConvTranspose2d(ngf, nc, kernel_size=4, stride=2, padding=3, bias=False),
-    nn.Sigmoid()
-    # (nc, 28, 28)
-)
-gnet = gnet.to(device)
-gnet.apply(weights_init)
+net_D = Discriminator(cfg.out_channels)
+net_D = net_D.to(device)
+net_D.apply(weights_init)
 
+dataset = datasets.MNIST(cfg.data, transform=tv.transforms.ToTensor())
+dataloader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True, drop_last=True)
+fixed_noises = torch.randn(cfg.batch_size, cfg.in_channels, 1, 1, device=device)
 
-dnet = nn.Sequential(
-    # (nc, 28, 28)
-    nn.Conv2d(nc, ndf, kernel_size=4, stride=2, padding=3, bias=False),
-    nn.LeakyReLU(0.2, inplace=True),
-    # (ndf, 16, 16)
-    nn.Conv2d(ndf, 2 * ndf, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(2 * ndf),
-    nn.LeakyReLU(0.2, inplace=True),
-    # (2 * ndf, 8, 8)
-    nn.Conv2d(2 * ndf, 4 * ndf, kernel_size=4, stride=2, padding=1, bias=False),
-    nn.BatchNorm2d(4 * ndf),
-    nn.LeakyReLU(0.2, inplace=True),
-    # (4 * ndf, 4, 4)
-    nn.Conv2d(4 * ndf, 1, kernel_size=4, stride=1, padding=0, bias=False),
-    nn.Sigmoid()
-    # (1, 1, 1)
-)
-dnet = dnet.to(device)
-dnet.apply(weights_init)
-
-
-criterion = nn.BCELoss()
-goptimizer = torch.optim.Adam(gnet.parameters(), lr=0.0002, betas=(0.5, 0.999))
-doptimizer = torch.optim.Adam(dnet.parameters(), lr=0.0002, betas=(0.5, 0.999))
+criterion = nn.MSELoss() # V(D, G) = log(D(x)) + log(1 - D(G(z)))
+optimizer_G = torch.optim.Adam(net_G.parameters(), lr=0.0002, betas=(0.5, 0.999))
+optimizer_D = torch.optim.Adam(net_D.parameters(), lr=0.0002, betas=(0.5, 0.999))
 
 plt.ion()
-for epoch in range(epochs):
-    print('Epoch: {}/{}'.format(epoch + 1, epochs))
+for epoch in range(cfg.epochs):
+    print('Epoch: {}/{}'.format(epoch + 1, cfg.epochs))
 
     for i, data in enumerate(dataloader):
-        # V(D, G) = log(D(x)) + log(1 - D(G(z)))
+        noises = torch.randn_like(fixed_noises, device=device)
 
-        # (1) update dnet: maximize D(x), minimize D(G(z)) -> maximize V(D, G)
+        # -------------------
+        # Train Discriminator
+        # -------------------
+
+        optimizer_D.zero_grad()
+
+        # Update net_D: maximize D(x), minimize D(G(z)) -> maximize V(D, G)
+
         # train with real
         real = data[0].to(device)
-        batch_size = real.size(0)
-
-        labels = torch.ones(batch_size).to(device)
-        outputs = dnet(real).view(-1)
-        dloss_real = criterion(outputs, labels)
-        D_x = outputs.mean().item()
+        pred_real = net_D(real)
+        loss_real = criterion(pred_real, torch.ones_like(pred_real, device=device))
+        D_x = pred_real.mean().item()
 
         # train with fake
-        noises = torch.randn(batch_size, nz, 1, 1).to(device)
-        fake = gnet(noises)
-        labels = torch.zeros(batch_size).to(device)
-        outputs = dnet(fake.detach()).view(-1) # not calc gnet's grad
-        dloss_fake = criterion(outputs, labels)
-        D_G_z1 = outputs.mean().item()
+        fake = net_G(noises)
+        pred_fake = net_D(fake.detach()) # not calc net_G's grad
+        loss_fake = criterion(pred_fake, torch.zeros_like(pred_fake, device=device))
+        D_G_z1 = pred_fake.mean().item()
 
-        dloss = dloss_real + dloss_fake
-        dnet.zero_grad()
-        dloss.backward()
-        doptimizer.step()
+        loss_D = loss_real + loss_fake
+        loss_D.backward()
+        optimizer_D.step()
 
-        # (2) update gnet: maximize D(G(z)) -> minimize V(D, G)
-        labels = torch.ones(batch_size).to(device)
-        outputs = dnet(fake).view(-1)
-        gloss = criterion(outputs, labels)
-        D_G_z2 = outputs.mean().item()
+        # ---------------
+        # Train Generator
+        # ---------------
 
-        gnet.zero_grad()
-        gloss.backward()
-        goptimizer.step()
+        optimizer_G.zero_grad()
+
+        # Update net_G: maximize D(G(z)) -> minimize V(D, G)
+        pred_fake = net_D(fake)
+        loss_G = criterion(pred_fake, torch.ones_like(pred_fake, device=device))
+        D_G_z2 = pred_fake.mean().item()
+
+        loss_G.backward()
+        optimizer_G.step()
+
+        # ---------
+        # Print Log
+        # ---------
 
         print(
-            '[{}/{}]'.format(epoch + 1, epochs) +
+            '[{}/{}]'.format(epoch + 1, cfg.epochs) +
             '[{}/{}]'.format(i + 1, len(dataloader)) + ', ' +
-            'dloss: {:.4f}, gloss: {:.4f}'.format(dloss.item(), gloss.item()) + ', ' +
+            'loss_D: {:.4f}, loss_G: {:.4f}'.format(loss_D.item(), loss_G.item()) + ', ' +
             'D(x): {:.2f}, D(G(z)): {:.2f}/{:.2f}'.format(D_x, D_G_z1, D_G_z2)
         )
 
         if i % 100 == 99:
-            fake = gnet(fixed_noises)
+            fake = net_G(fixed_noises)
             fake = fake.detach().cpu()
             fake = tv.utils.make_grid(fake)
             fake = fake.numpy().transpose(1, 2, 0)
