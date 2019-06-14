@@ -1,5 +1,5 @@
 import os
-import sys
+import cv2
 import argparse
 
 import numpy as np
@@ -15,11 +15,12 @@ from torchvision import datasets
 from torch.utils.data import DataLoader
 
 
+root = os.path.expanduser('~/.cache/torch/datasets')
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data', type=str, default=os.path.expanduser('~/.torch/datasets'))
-parser.add_argument('--epochs', type=int, default=1)
+parser.add_argument('--data', type=str, default=root)
+parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--lr', type=float, default=0.0002)
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--in_channels', type=int, default=64)
