@@ -1,4 +1,0 @@
-{
-    "terminal.integrated.env.windows": {"python": "pytorch"},
-    "python.pythonPath": "C:\\Apps\\Miniconda3\\envs\\pytorch\\python.exe"
-}
